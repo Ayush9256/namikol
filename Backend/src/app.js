@@ -5,6 +5,8 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const mongoSanitize = require("@exortek/express-mongo-sanitize");
 const mongoose = require("mongoose");
+const path = require("node:path");
+const fs = require("node:fs");
 
 const productRoutes = require("./routes/productRoutes");
 const authRoutes = require("./routes/authRoutes");
@@ -24,6 +26,14 @@ app.disable("x-powered-by");
 
 app.use(
   helmet({
+    contentSecurityPolicy: {
+      directives: {
+        "script-src": ["'self'", "https://checkout.razorpay.com"],
+        "frame-src": ["'self'", "https://api.razorpay.com", "https://checkout.razorpay.com"],
+        "connect-src": ["'self'", "https://api.razorpay.com", "https://checkout.razorpay.com"],
+        "img-src": ["'self'", "data:", "https:"],
+      },
+    },
     crossOriginResourcePolicy: {
       policy: "cross-origin",
     },
@@ -31,6 +41,8 @@ app.use(
 );
 
 const allowedOrigins = new Set([
+  "https://namikol.com",
+  "https://www.namikol.com",
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:3000",
@@ -75,7 +87,10 @@ const apiLimiter = rateLimit({
 
 app.use("/api", apiLimiter);
 
-app.get("/", (req, res) => {
+const frontendDirectory = path.resolve(__dirname, "../../Frontend/dist");
+const serveFrontend = process.env.SERVE_FRONTEND === "true";
+
+if (!serveFrontend) app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
     message: "NAMIKOL API is running",
@@ -105,6 +120,18 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/admin/messages", adminMessageRoutes);
+
+if (serveFrontend) {
+  if (!fs.existsSync(path.join(frontendDirectory, "index.html"))) {
+    throw new Error("Frontend build missing. Run npm run build from the repository root.");
+  }
+  app.use(express.static(frontendDirectory));
+  app.use((req, res, next) => {
+    if (req.path === "/api" || req.path.startsWith("/api/") ||
+        !["GET", "HEAD"].includes(req.method) || path.extname(req.path)) return next();
+    res.sendFile(path.join(frontendDirectory, "index.html"));
+  });
+}
 
 app.use((req, res) => {
   res.status(404).json({ success: false, message: "API route not found." });

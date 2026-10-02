@@ -1,0 +1,11 @@
+{
+  "name": "namikol",
+  "version": "1.0.0",
+  "private": true,
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "postinstall": "npm ci --prefix Backend --omit=dev && npm ci --prefix Frontend --include=dev && npm run build",
+    "build": "npm run build --prefix Frontend",
+    "start": "node server.js"
+  }
+}
