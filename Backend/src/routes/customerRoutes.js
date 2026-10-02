@@ -1,6 +1,8 @@
 const express = require("express");
+const mongoose = require("mongoose");
 
 const Customer = require("../models/Customer");
+const deleteCustomerData = require("../services/deleteCustomerData");
 const adminAuth = require("../middleware/adminAuth");
 const protectCustomer = require("../middleware/authMiddleware");
 
@@ -25,6 +27,10 @@ const {
 } = require("../controllers/addressController");
 
 const router = express.Router();
+router.param("id", (req, res, next, id) => {
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ success: false, message: "Invalid customer or address ID." });
+  next();
+});
 
 // ===============================
 // ADMIN CUSTOMER COUNT
@@ -103,10 +109,7 @@ router.delete("/admin/:id", adminAuth, async (req, res) => {
       });
     }
 
-    await Customer.deleteOne({
-      _id: id,
-      role: "customer",
-    });
+    await deleteCustomerData(id);
 
     return res.status(200).json({
       success: true,
@@ -116,10 +119,7 @@ router.delete("/admin/:id", adminAuth, async (req, res) => {
   } catch (error) {
     console.error("Delete customer error:", error);
 
-    return res.status(500).json({
-      success: false,
-      message: "Unable to delete customer.",
-    });
+    return res.status(error.status || 500).json({ success: false, message: error.status ? error.message : "Unable to delete customer." });
   }
 });
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   Navigate,
   Route,
@@ -10,49 +10,50 @@ import MainLayout from "../layouts/MainLayout";
 import api from "../services/api";
 
 // Customer Pages
-import Home from "../pages/Home";
-import Shop from "../pages/Shop";
-import NewArrivals from "../pages/NewArrivals";
-import BestSellers from "../pages/BestSellers";
-import ProductDetails from "../pages/ProductDetails";
-import Cart from "../pages/Cart";
-import Wishlist from "../pages/Wishlist";
-import Search from "../pages/Search";
-import Login from "../pages/Login";
-import Register from "../pages/Register";
-import Collections from "../pages/Collections";
-import About from "../pages/About";
-import Contact from "../pages/Contact";
+const Home = lazy(() => import("../pages/Home"));
+const Shop = lazy(() => import("../pages/Shop"));
+const NewArrivals = lazy(() => import("../pages/NewArrivals"));
+const BestSellers = lazy(() => import("../pages/BestSellers"));
+const ProductDetails = lazy(() => import("../pages/ProductDetails"));
+const Cart = lazy(() => import("../pages/Cart"));
+const Wishlist = lazy(() => import("../pages/Wishlist"));
+const Search = lazy(() => import("../pages/Search"));
+const Login = lazy(() => import("../pages/Login"));
+const Register = lazy(() => import("../pages/Register"));
+const Collections = lazy(() => import("../pages/Collections"));
+const About = lazy(() => import("../pages/About"));
+const Contact = lazy(() => import("../pages/Contact"));
 
 // Admin Pages
-import AdminLogin from "../pages/AdminLogin";
-import AdminDashboard from "../pages/admin/AdminDashboard";
-import AdminProducts from "../pages/admin/AdminProducts";
-import AdminAddProduct from "../pages/admin/AdminAddProduct";
-import AdminOrders from "../pages/admin/AdminOrders";
-import AdminEditProduct from "../pages/admin/AdminEditProduct";
-import AdminSettings from "../pages/admin/AdminSettings";
-import AdminCustomers from "../pages/admin/AdminCustomers";
-import AdminAnalytics from "../pages/admin/AdminAnalytics";
-import AdminPasswordRecovery from "../pages/admin/AdminPasswordRecovery";
-import AdminMessages from "../pages/admin/AdminMessages";
+const AdminLogin = lazy(() => import("../pages/AdminLogin"));
+const AdminDashboard = lazy(() => import("../pages/admin/AdminDashboard"));
+const AdminProducts = lazy(() => import("../pages/admin/AdminProducts"));
+const AdminAddProduct = lazy(() => import("../pages/admin/AdminAddProduct"));
+const AdminOrders = lazy(() => import("../pages/admin/AdminOrders"));
+const AdminEditProduct = lazy(() => import("../pages/admin/AdminEditProduct"));
+const AdminSettings = lazy(() => import("../pages/admin/AdminSettings"));
+const AdminCustomers = lazy(() => import("../pages/admin/AdminCustomers"));
+const AdminAnalytics = lazy(() => import("../pages/admin/AdminAnalytics"));
+const AdminPasswordRecovery = lazy(() => import("../pages/admin/AdminPasswordRecovery"));
+const AdminMessages = lazy(() => import("../pages/admin/AdminMessages"));
 
 // User Pages
-import Account from "../pages/user/Account";
-import Profile from "../pages/user/Profile";
-import Addresses from "../pages/user/Addresses";
-import Checkout from "../pages/Checkout";
-import OrderConfirmation from "../pages/user/OrderConfirmation";
-import Orders from "../pages/user/Orders";
-import OrderDetails from "../pages/user/OrderDetails";
-import Settings from "../pages/user/Settings";
-import ChangePassword from "../pages/user/ChangePassword";
-import PasswordRecovery from "../pages/user/PasswordRecovery";
+const Account = lazy(() => import("../pages/user/Account"));
+const Profile = lazy(() => import("../pages/user/Profile"));
+const Addresses = lazy(() => import("../pages/user/Addresses"));
+const Checkout = lazy(() => import("../pages/Checkout"));
+const OrderConfirmation = lazy(() => import("../pages/user/OrderConfirmation"));
+const Orders = lazy(() => import("../pages/user/Orders"));
+const OrderDetails = lazy(() => import("../pages/user/OrderDetails"));
+const Settings = lazy(() => import("../pages/user/Settings"));
+const ChangePassword = lazy(() => import("../pages/user/ChangePassword"));
+const PasswordRecovery = lazy(() => import("../pages/user/PasswordRecovery"));
 
 function AdminProtectedRoute({ children }) {
   const location = useLocation();
 
-  const [status, setStatus] = useState("checking");
+  const [session, setSession] = useState({ path: location.pathname, status: "checking" });
+  const status = session.path === location.pathname ? session.status : "checking";
 
   useEffect(() => {
     let cancelled = false;
@@ -66,16 +67,16 @@ function AdminProtectedRoute({ children }) {
           response.data?.success === true &&
           response.data?.admin?.role === "admin"
         ) {
-          setStatus("authenticated");
+          setSession({ path: location.pathname, status: "authenticated" });
           return;
         }
 
         if (!cancelled) {
-          setStatus("unauthenticated");
+          setSession({ path: location.pathname, status: "unauthenticated" });
         }
       } catch {
         if (!cancelled) {
-          setStatus("unauthenticated");
+          setSession({ path: location.pathname, status: "unauthenticated" });
         }
       }
     };
@@ -118,6 +119,7 @@ function AdminProtectedRoute({ children }) {
 
 function AppRoutes() {
   return (
+    <Suspense fallback={<div role="status" className="flex min-h-screen items-center justify-center bg-black text-white">Loading...</div>}>
     <Routes>
       {/* Customer Website */}
       <Route element={<MainLayout />}>
@@ -293,7 +295,9 @@ function AppRoutes() {
         path="/admin/reset-password"
         element={<AdminPasswordRecovery />}
       />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }
 

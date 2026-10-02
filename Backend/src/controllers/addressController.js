@@ -7,7 +7,12 @@ const validateAddress = ({
   city,
   state,
   pincode,
+  landmark,
 }) => {
+  if ([fullName, phone, addressLine, city, state, pincode].some((value) => typeof value !== "string") ||
+    (landmark != null && typeof landmark !== "string")) {
+    return "Address fields must be text.";
+  }
   if (
     !fullName?.trim() ||
     !phone?.trim() ||

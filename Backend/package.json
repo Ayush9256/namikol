@@ -7,7 +7,11 @@
   "dev": "nodemon src/server.js",
   "build": "echo build",
   "start": "node server.js",
-  "admin:create": "node src/scripts/createAdmin.js"
+  "admin:create": "node src/scripts/createAdmin.js",
+  "test": "node --test",
+  "check:services": "node src/scripts/checkServices.js",
+  "test:integration": "node src/scripts/runIntegrationTests.js",
+  "db:prepare": "node src/scripts/prepareDatabase.js"
 },
   "keywords": [],
   "author": "",

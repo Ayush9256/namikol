@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const customerSchema = new mongoose.Schema(
   {
+    checkoutActivityAt: { type: Date, default: null },
     firstName: {
       type: String,
       required: true,

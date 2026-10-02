@@ -382,6 +382,12 @@ function OrderDetails() {
           </div>
         </div>
 
+        {order.refundStatus && order.refundStatus !== "Not Requested" && (
+          <div role="status" className="mt-6 rounded-xl border border-white/10 p-4 text-sm text-amber-300">
+            Refund: {order.refundStatus === "Review Required" ? "Support is checking your refund" : order.refundStatus}
+          </div>
+        )}
+
         {/* Return & Refund Status */}
         {order.returnStatus &&
           order.returnStatus !== "Not Requested" && (

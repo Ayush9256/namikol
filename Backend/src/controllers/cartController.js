@@ -201,6 +201,10 @@ const addToCart = async (req, res) => {
         requestedQuantity
       : requestedQuantity;
 
+    if (newQuantity > 20) {
+      return res.status(400).json({ success: false, message: "Maximum quantity per product size is 20." });
+    }
+
     if (newQuantity > availableStock) {
       return res.status(400).json({
         success: false,
@@ -509,7 +513,7 @@ const clearCart = async (req, res) => {
       },
       {
         upsert: true,
-        new: true,
+        returnDocument: "after",
       }
     );
 
@@ -566,6 +570,7 @@ const syncCart = async (req, res) => {
     }
 
     for (const localItem of items) {
+      if (!localItem || typeof localItem !== "object" || Array.isArray(localItem)) continue;
       const productId =
         localItem.productId ||
         localItem.id ||

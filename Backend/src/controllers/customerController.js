@@ -1,13 +1,6 @@
-const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const Customer = require("../models/Customer");
-const Address = require("../models/Address");
-const Cart = require("../models/Cart");
-const Wishlist = require("../models/Wishlist");
-const EmailVerification = require("../models/EmailVerification");
-const CustomerPasswordReset = require("../models/CustomerPasswordReset");
-const PaymentIntent = require("../models/PaymentIntent");
-const Order = require("../models/Order");
+const deleteCustomerData = require("../services/deleteCustomerData");
 
 const getCustomerProfile = async (req, res) => {
   try {
@@ -49,6 +42,10 @@ const updateCustomerProfile = async (req, res) => {
       pincode,
     } = req.body;
 
+    if ([firstName, lastName].some((value) => typeof value !== "string") ||
+      [phone, address, city, state, pincode].some((value) => value != null && typeof value !== "string")) {
+      return res.status(400).json({ success: false, message: "Profile fields must be text." });
+    }
     if (!firstName?.trim() || !lastName?.trim()) {
       return res.status(400).json({
         success: false,
@@ -191,76 +188,15 @@ const changeCustomerPassword = async (req, res) => {
   }
 };
 const deleteCustomerAccount = async (req, res) => {
-  const { password } = req.body;
-
-  if (!password) {
-    return res.status(400).json({
-      success: false,
-      message: "Your password is required to delete your account.",
-    });
-  }
-
-  const session = await mongoose.startSession();
-
   try {
+    const { password } = req.body;
+    if (typeof password !== "string" || !password) return res.status(400).json({ success: false, message: "Your password is required to delete your account." });
     const customer = await Customer.findById(req.customer.id).select("+password");
-
-    if (!customer || !(await bcrypt.compare(password, customer.password))) {
-      return res.status(401).json({
-        success: false,
-        message: "Password is incorrect.",
-      });
-    }
-
-    await session.withTransaction(async () => {
-      const customerId = customer._id;
-      const redactedAddress = {
-        id: "",
-        fullName: "Deleted Customer",
-        phone: "Redacted",
-        addressLine: "Redacted",
-        city: "Redacted",
-        state: "Redacted",
-        pincode: "000000",
-        landmark: "",
-      };
-
-      await Address.deleteMany({ customerId }, { session });
-      await Cart.deleteMany({ customerId }, { session });
-      await Wishlist.deleteMany({ customerId }, { session });
-      await EmailVerification.deleteMany({ customerId }, { session });
-      await CustomerPasswordReset.deleteMany({ customerId }, { session });
-      await PaymentIntent.deleteMany({ customerId }, { session });
-      await Order.updateMany(
-        { customerId },
-        {
-          $set: {
-            customer: {
-              firstName: "Deleted",
-              lastName: "Customer",
-              email: `deleted-${customerId}@privacy.invalid`,
-            },
-            shippingAddress: redactedAddress,
-            returnReason: "",
-          },
-        },
-        { session }
-      );
-      await Customer.deleteOne({ _id: customerId }, { session });
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Your account has been deleted.",
-    });
+    if (!customer || !(await bcrypt.compare(password, customer.password))) return res.status(401).json({ success: false, message: "Password is incorrect." });
+    await deleteCustomerData(customer._id);
+    return res.status(200).json({ success: true, message: "Your account has been deleted." });
   } catch (error) {
-    console.error("Delete customer account error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Unable to delete your account.",
-    });
-  } finally {
-    await session.endSession();
+    return res.status(error.status || 500).json({ success: false, message: error.status ? error.message : "Unable to delete your account." });
   }
 };
 

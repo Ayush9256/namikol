@@ -6,6 +6,9 @@ const Order = require("../models/Order")
 const Customer = require("../models/Customer")
 const Product = require("../models/Product")
 const PaymentIntent = require("../models/PaymentIntent")
+const StoreSettings = require("../models/StoreSettings")
+const { processRefund } = require("../services/refundService")
+const refundUnfulfilledPayment = require("../services/unfulfilledPayment")
 
 const generateOrderNumber = () => {
   const timestamp = Date.now().toString().slice(-8)
@@ -43,9 +46,15 @@ const saveVerifiedOrder = async ({
         paymentIntent._id
       ).session(session)
 
-      if (!currentIntent || currentIntent.status !== "Created") {
+      if (currentIntent?.status === "Failed") throw new Error("INSUFFICIENT_INVENTORY")
+      if (!currentIntent || !["Created", "Expired"].includes(currentIntent.status)) {
         throw new Error("PAYMENT_INTENT_UNAVAILABLE")
       }
+
+      const customerWrite = await Customer.updateOne(
+        { _id: customer._id }, { $set: { checkoutActivityAt: new Date() } }, { session }
+      )
+      if (!customerWrite.matchedCount) throw new Error("CUSTOMER_UNAVAILABLE")
 
       for (const item of currentIntent.items) {
         const update = await Product.updateOne(
@@ -122,18 +131,13 @@ const saveVerifiedOrder = async ({
 */
 
 const validateShippingAddress = (shippingAddress) => {
-  if (!shippingAddress) {
+  if (!shippingAddress || typeof shippingAddress !== "object") {
     return false
   }
 
-  return Boolean(
-    shippingAddress.fullName?.trim() &&
-      shippingAddress.phone?.trim() &&
-      shippingAddress.addressLine?.trim() &&
-      shippingAddress.city?.trim() &&
-      shippingAddress.state?.trim() &&
-      shippingAddress.pincode?.trim()
-  )
+  return ["fullName", "phone", "addressLine", "city", "state", "pincode"]
+    .every((field) => typeof shippingAddress[field] === "string" && shippingAddress[field].trim()) &&
+    (shippingAddress.landmark == null || typeof shippingAddress.landmark === "string")
 }
 
 /*
@@ -169,7 +173,6 @@ const createRazorpayOrder = async (req, res) => {
   try {
     const {
       items,
-      currency = "INR",
       receipt,
       shippingAddress,
       source = "cart",
@@ -214,6 +217,9 @@ const createRazorpayOrder = async (req, res) => {
     */
 
     for (const item of items) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return res.status(400).json({ success: false, message: "Invalid checkout item." })
+      }
       const productId =
         item.productId ||
         item.id ||
@@ -355,6 +361,9 @@ const createRazorpayOrder = async (req, res) => {
 
       const itemTotal = price * quantity
       const deliveryCharge = Number(product.deliveryCharge || 0)
+      if (!Number.isFinite(deliveryCharge) || deliveryCharge < 0) {
+        return res.status(400).json({ success: false, message: "Invalid product delivery charge." })
+      }
 
       subtotal += itemTotal
       shipping += deliveryCharge * quantity
@@ -409,6 +418,10 @@ const createRazorpayOrder = async (req, res) => {
     */
 
 const total = subtotal + shipping;
+    const settings = await StoreSettings.findOne({ key: "store" }).select("allowOrders").lean()
+    if (settings?.allowOrders === false) {
+      return res.status(409).json({ success: false, message: "The store is not accepting new orders right now." })
+    }
 
     const amountInPaise =
       Math.round(total * 100)
@@ -457,8 +470,7 @@ const total = subtotal + shipping;
     |--------------------------------------------------------------------------
     */
 
-    const paymentIntent =
-      await PaymentIntent.create({
+    const intentData = {
         customerId:
           req.customer.id,
 
@@ -518,7 +530,21 @@ const total = subtotal + shipping;
             Date.now() +
               15 * 60 * 1000
           ),
+      }
+    const intentSession = await mongoose.startSession()
+    let paymentIntent
+    try {
+      await intentSession.withTransaction(async () => {
+        const customerWrite = await Customer.updateOne(
+          { _id: req.customer.id, isActive: true }, { $set: { checkoutActivityAt: new Date() } }, { session: intentSession }
+        )
+        if (!customerWrite.matchedCount) throw Object.assign(new Error("Customer account is unavailable."), { status: 401 })
+        ;[paymentIntent] = await PaymentIntent.create([intentData], { session: intentSession })
       })
+    } finally {
+      await intentSession.endSession()
+    }
+
 
     /*
     |--------------------------------------------------------------------------
@@ -558,13 +584,13 @@ const total = subtotal + shipping;
   } catch (error) {
     console.error(
       "Razorpay order creation failed:",
-      error
+      error.code || error.name || "GatewayError"
     )
 
-    return res.status(500).json({
+    return res.status(error.status || 500).json({
       success: false,
       message:
-        "Unable to create Razorpay order.",
+        error.status === 503 ? error.message : "Unable to create Razorpay order.",
     })
   }
 }
@@ -608,9 +634,9 @@ const verifyRazorpayPayment = async (
     */
 
     if (
-      !razorpay_order_id ||
-      !razorpay_payment_id ||
-      !razorpay_signature
+      typeof razorpay_order_id !== "string" || !razorpay_order_id ||
+      typeof razorpay_payment_id !== "string" || !razorpay_payment_id ||
+      typeof razorpay_signature !== "string" || !razorpay_signature
     ) {
       return res.status(400).json({
         success: false,
@@ -624,6 +650,10 @@ const verifyRazorpayPayment = async (
     | VERIFY RAZORPAY SIGNATURE
     |--------------------------------------------------------------------------
     */
+
+    if (!process.env.RAZORPAY_KEY_SECRET || !process.env.RAZORPAY_KEY_ID) {
+      return res.status(503).json({ success: false, message: "Payment service is not configured." })
+    }
 
     const generatedSignature =
       crypto
@@ -792,9 +822,13 @@ const verifyRazorpayPayment = async (
       }
     }
 
+    if (paymentIntent.status === "Failed" && paymentIntent.razorpayPaymentId === razorpay_payment_id) {
+      const failed = await processRefund(PaymentIntent, paymentIntent._id)
+      return res.status(409).json({ success: false, message: failed.refundStatus === "Completed" ? "The selected size sold out. Your payment has been refunded." : "The selected size sold out. Your refund is being processed.", refundStatus: failed.refundStatus })
+    }
+
     if (
-      paymentIntent.status !==
-      "Created"
+      !["Created", "Expired"].includes(paymentIntent.status)
     ) {
       return res.status(400).json({
         success: false,
@@ -855,6 +889,19 @@ const verifyRazorpayPayment = async (
     |--------------------------------------------------------------------------
     */
 
+    const payment = await razorpay.payments.fetch(razorpay_payment_id)
+    if (
+      !payment || payment.order_id !== razorpay_order_id ||
+      payment.status !== "captured" ||
+      Number(payment.amount) !== expectedAmount ||
+      payment.currency !== "INR" || razorpayOrder.currency !== "INR"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A captured payment matching this order is required.",
+      })
+    }
+
     const customerRecord =
       await Customer.findById(
         req.customer.id
@@ -863,11 +910,9 @@ const verifyRazorpayPayment = async (
       )
 
     if (!customerRecord) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Customer account not found.",
-      })
+      const result = await refundUnfulfilledPayment(paymentIntent, razorpay_payment_id, "Account unavailable")
+      if (result.order) return res.status(200).json({ success: true, order: result.order })
+      return res.status(409).json({ success: false, message: "This account is unavailable. Your payment refund is being processed.", refundStatus: result.intent?.refundStatus })
     }
 
     /*
@@ -991,32 +1036,14 @@ const verifyRazorpayPayment = async (
         orderItems,
       })
     } catch (error) {
-      if (error.message !== "INSUFFICIENT_INVENTORY") {
-        throw error
-      }
-
-      try {
-        await razorpay.payments.refund(razorpay_payment_id)
-        await PaymentIntent.updateOne(
-          {
-            _id: paymentIntent._id,
-            customerId: req.customer.id,
-            status: "Created",
-          },
-          { $set: { status: "Failed" } }
-        )
-
+      if (!["INSUFFICIENT_INVENTORY", "CUSTOMER_UNAVAILABLE"].includes(error.message)) throw error
+      const result = await refundUnfulfilledPayment(paymentIntent, razorpay_payment_id, error.message === "INSUFFICIENT_INVENTORY" ? "Inventory" : "Account unavailable")
+      order = result.order
+      if (!order) {
         return res.status(409).json({
           success: false,
-          message:
-            "The selected size sold out during payment. A refund has been initiated.",
-        })
-      } catch (refundError) {
-        console.error("Automatic refund failed:", refundError)
-        return res.status(502).json({
-          success: false,
-          message:
-            "Payment succeeded but inventory could not be reserved. Contact support with your payment ID.",
+          message: result.intent?.refundStatus === "Completed" ? "This order could not be fulfilled. Your payment has been refunded." : "This order could not be fulfilled. Your refund is being processed.",
+          refundStatus: result.intent?.refundStatus,
         })
       }
     }
@@ -1036,31 +1063,12 @@ const verifyRazorpayPayment = async (
       order,
     })
 } catch (error) {
-  console.error(
-    "Razorpay payment verification failed:",
-    error
-  )
+  console.error("Razorpay verification failed:", error.code || error.name || "GatewayError")
 
-  console.error(
-    "Error name:",
-    error?.name
-  )
-
-  console.error(
-    "Error message:",
-    error?.message
-  )
-
-  console.error(
-    "Error stack:",
-    error?.stack
-  )
-
-  return res.status(500).json({
+  return res.status(error.status || 500).json({
     success: false,
     message:
-      error?.message ||
-      "Unable to verify Razorpay payment.",
+      error.status === 503 ? error.message : "Unable to verify Razorpay payment.",
   })
 }
 }

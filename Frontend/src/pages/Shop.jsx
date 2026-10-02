@@ -20,8 +20,6 @@ function Shop() {
   const [error, setError] = useState("")
 
   const [search, setSearch] = useState("")
-  const [gender, setGender] = useState("all")
-  const [category, setCategory] = useState("all")
   const [sort, setSort] = useState("featured")
 
   const categories = [
@@ -53,25 +51,8 @@ function Shop() {
   // SYNC URL FILTERS → STATE
   // =====================================================
 
-  useEffect(() => {
-    const nextGender =
-      genderParam === "men" ||
-      genderParam === "women"
-        ? genderParam
-        : "all"
-
-    const nextCategory = categories.includes(
-      categoryParam
-    )
-      ? categoryParam
-      : "all"
-
-    setGender(nextGender)
-    setCategory(nextCategory)
-  }, [
-    genderParam,
-    categoryParam,
-  ])
+  const gender = ["men", "women"].includes(genderParam) ? genderParam : "all"
+  const category = categories.includes(categoryParam) ? categoryParam : "all"
 
   // =====================================================
   // LOAD PRODUCTS FROM MONGODB
@@ -113,7 +94,6 @@ function Shop() {
   // =====================================================
 
   const handleGenderChange = (value) => {
-    setGender(value)
 
     const nextParams = new URLSearchParams(
       searchParams
@@ -133,7 +113,6 @@ function Shop() {
   // =====================================================
 
   const handleCategoryChange = (value) => {
-    setCategory(value)
 
     const nextParams = new URLSearchParams(
       searchParams
@@ -260,8 +239,6 @@ function Shop() {
 
   const clearFilters = () => {
     setSearch("")
-    setGender("all")
-    setCategory("all")
     setSort("featured")
 
     const nextParams = new URLSearchParams(

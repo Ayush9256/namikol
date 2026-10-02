@@ -12,7 +12,7 @@ const sendEmailChangeOtp = async (req, res) => {
   try {
     const { newEmail } = req.body;
 
-    if (!newEmail?.trim()) {
+    if (typeof newEmail !== "string" || !newEmail.trim()) {
       return res.status(400).json({
         success: false,
         message: "New email address is required.",
@@ -133,7 +133,7 @@ const verifyEmailChangeOtp = async (req, res) => {
   try {
     const { otp } = req.body;
 
-    if (!otp?.trim()) {
+    if (typeof otp !== "string" || !/^\d{6}$/.test(otp.trim())) {
       return res.status(400).json({
         success: false,
         message: "OTP is required.",

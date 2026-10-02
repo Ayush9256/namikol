@@ -398,7 +398,7 @@ const updateProduct = async (req, res) => {
       req.params.id,
       updates,
       {
-        new: true,
+        returnDocument: "after",
         runValidators: true,
       }
     );

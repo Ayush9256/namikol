@@ -65,7 +65,7 @@ function Footer() {
 
           return
         }
-      } catch (error) {
+      } catch {
         // Admin is not logged in.
       }
 

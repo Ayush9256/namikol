@@ -55,6 +55,10 @@ app.use(
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+app.use((req, res, next) => {
+  req.body ??= {};
+  next();
+});
 app.use(cookieParser());
 app.use(mongoSanitize());
 
@@ -101,5 +105,19 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/admin/messages", adminMessageRoutes);
+
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: "API route not found." });
+});
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  const status = error.status || (error.code === "LIMIT_FILE_SIZE" ? 413 :
+    ["CastError", "ValidationError", "MulterError"].includes(error.name) ? 400 : 500);
+  res.status(status).json({
+    success: false,
+    message: status < 500 ? error.message : "An unexpected server error occurred.",
+  });
+});
 
 module.exports = app;

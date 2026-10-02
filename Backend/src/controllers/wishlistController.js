@@ -44,7 +44,7 @@ const addWishlistProduct = async (req, res) => {
     const wishlist = await Wishlist.findOneAndUpdate(
       { customerId: req.customer.id },
       { $addToSet: { products: product._id } },
-      { upsert: true, new: true, runValidators: true }
+      { upsert: true, returnDocument: "after", runValidators: true }
     ).populate("products");
 
     return res.status(200).json({
@@ -74,7 +74,7 @@ const removeWishlistProduct = async (req, res) => {
     const wishlist = await Wishlist.findOneAndUpdate(
       { customerId: req.customer.id },
       { $pull: { products: productId } },
-      { new: true }
+      { returnDocument: "after" }
     ).populate("products");
 
     return res.status(200).json({

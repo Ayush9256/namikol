@@ -120,6 +120,8 @@ const shippingAddressSchema =
 
 const orderSchema = new mongoose.Schema(
   {
+    ...require("./refundFields"),
+    inventoryRestoredAt: { type: Date, default: null },
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",

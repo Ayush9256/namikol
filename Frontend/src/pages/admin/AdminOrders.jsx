@@ -23,6 +23,12 @@ const ORDER_STATUSES = [
   "Cancelled",
 ];
 
+const ORDER_TRANSITIONS = {
+  Placed: ["Processing", "Cancelled"], Processing: ["Shipped", "Cancelled"],
+  Shipped: ["Out for Delivery", "Delivered"], "Out for Delivery": ["Delivered"],
+  Delivered: [], Cancelled: [],
+};
+
 const PAYMENT_STATUSES = [
   "Pending",
   "Paid",
@@ -256,6 +262,19 @@ function AdminOrders() {
       );
     } finally {
       setUpdatingOrderId(null);
+    }
+  };
+
+  const handleRefundCheck = async (orderId) => {
+    try {
+      setUpdatingPaymentId(orderId);
+      setErrorMessage("");
+      const response = await api.post(`/orders/${orderId}/refund/reconcile`);
+      setOrders((current) => current.map((order) => order.id === orderId ? normalizeOrder(response.data.order) : order));
+    } catch (error) {
+      setErrorMessage(error.response?.data?.message || "Unable to check refund status.");
+    } finally {
+      setUpdatingPaymentId(null);
     }
   };
 
@@ -878,6 +897,15 @@ function AdminOrders() {
                         </div>
                       </div>
 
+                      {order.refundStatus && order.refundStatus !== "Not Requested" && (
+                        <div className="mt-4 flex items-center gap-3 text-xs text-amber-300">
+                          <span>Refund: {order.refundStatus}</span>
+                          {order.refundStatus !== "Completed" && (
+                            <button type="button" disabled={updatingPaymentId === order.id} onClick={() => handleRefundCheck(order.id)} className="rounded-lg border border-white/20 px-3 py-2 disabled:opacity-50">Check refund</button>
+                          )}
+                        </div>
+                      )}
+
                       {/* Controls */}
                       <div className="mt-5 flex flex-col gap-3 border-t border-white/10 pt-5">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -900,7 +928,7 @@ function AdminOrders() {
                                 }
                                 className="appearance-none rounded-xl border border-white/10 bg-black px-4 py-2.5 pr-9 text-xs font-medium text-neutral-300 outline-none focus:border-white/25 disabled:cursor-not-allowed disabled:opacity-50"
                               >
-                                {ORDER_STATUSES.map(
+                                {[order.orderStatus, ...(ORDER_TRANSITIONS[order.orderStatus] || [])].map(
                                   (status) => (
                                     <option
                                       key={status}
@@ -926,7 +954,7 @@ function AdminOrders() {
                                   "Pending"
                                 }
                                 disabled={
-                                  isUpdatingPayment
+                                  isUpdatingPayment || order.paymentMethod === "Razorpay"
                                 }
                                 onChange={(event) =>
                                   handlePaymentStatusChange(
@@ -1045,7 +1073,7 @@ function AdminOrders() {
                               className="mt-3 rounded-lg border border-white/10 bg-black px-3 py-2 text-xs text-white"
                             >
                               <option value="" disabled>Update return</option>
-                              <option value="Completed">Issue refund and complete</option>
+                              <option value="Completed" disabled={order.refundStatus && order.refundStatus !== "Not Requested"}>Issue refund and complete</option>
                             </select>
                           </div>
                         )}

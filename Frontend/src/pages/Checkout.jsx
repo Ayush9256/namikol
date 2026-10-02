@@ -19,6 +19,7 @@ import {
 import { useCart } from "../context/useCart"
 
 import api from "../services/api"
+import { loadRazorpayScript } from "../utils/loadRazorpay"
 
 function Checkout() {
   const navigate = useNavigate()
@@ -344,46 +345,6 @@ function Checkout() {
     }
   }
 
-  const loadRazorpayScript = () => {
-    return new Promise((resolve) => {
-      if (window.Razorpay) {
-        resolve(true)
-        return
-      }
-
-      const existingScript = document.querySelector(
-        'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
-      )
-
-      if (existingScript) {
-        existingScript.addEventListener(
-          "load",
-          () => resolve(true)
-        )
-
-        existingScript.addEventListener(
-          "error",
-          () => resolve(false)
-        )
-
-        return
-      }
-
-      const script = document.createElement("script")
-
-      script.src =
-        "https://checkout.razorpay.com/v1/checkout.js"
-
-      script.async = true
-
-      script.onload = () => resolve(true)
-
-      script.onerror = () => resolve(false)
-
-      document.body.appendChild(script)
-    })
-  }
-
   const handlePlaceOrder = async () => {
     if (isPlacingOrder) return
 
@@ -665,7 +626,7 @@ function Checkout() {
               if (
                 purchasedCartIds.length > 0
               ) {
-                removeItemsFromCart(
+                await removeItemsFromCart(
                   purchasedCartIds
                 )
               }

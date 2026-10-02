@@ -77,16 +77,14 @@ function Orders() {
           order._id === orderId
             ? {
                 ...order,
-                orderStatus:
-                  response.data.order?.orderStatus ||
-                  "Cancelled",
+                ...response.data.order,
               }
             : order
         )
       )
 
       window.alert(
-        "Order cancelled successfully."
+        response.data.message || "Order cancelled successfully."
       )
     } catch (error) {
       console.error(
@@ -323,6 +321,9 @@ function Orders() {
                         >
                           {order.orderStatus}
                         </span>
+                        {order.refundStatus && order.refundStatus !== "Not Requested" && (
+                          <span className="text-xs text-amber-300">Refund: {order.refundStatus}</span>
+                        )}
                       </div>
 
                       <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-neutral-500">

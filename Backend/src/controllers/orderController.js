@@ -1,136 +1,7 @@
 const Order = require("../models/Order");
-const Customer = require("../models/Customer");
-const razorpay = require("../config/razorpay");
+const { transitionOrder } = require("../services/orderLifecycle");
+const { processRefund } = require("../services/refundService");
 
-const generateOrderNumber = () => {
-  const timestamp = Date.now().toString().slice(-8);
-  const random = Math.floor(1000 + Math.random() * 9000);
-
-  return `NMK-${timestamp}-${random}`;
-};
-
-const createOrder = async (req, res) => {
-  try {
-    const {
-      items,
-      itemCount,
-      skuCount,
-      subtotal,
-      shipping,
-      total,
-      shippingAddress,
-      paymentMethod,
-      source,
-    } = req.body;
-
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Order must contain at least one item.",
-      });
-    }
-
-    if (!shippingAddress) {
-      return res.status(400).json({
-        success: false,
-        message: "Shipping address is required.",
-      });
-    }
-
-    if (
-      !shippingAddress.fullName?.trim() ||
-      !shippingAddress.phone?.trim() ||
-      !shippingAddress.addressLine?.trim() ||
-      !shippingAddress.city?.trim() ||
-      !shippingAddress.state?.trim() ||
-      !shippingAddress.pincode?.trim()
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Complete shipping address is required.",
-      });
-    }
-
-    // Get the authenticated customer directly from MongoDB.
-    const customerRecord = await Customer.findById(req.customer.id).select(
-      "firstName lastName email"
-    );
-
-    if (!customerRecord) {
-      return res.status(404).json({
-        success: false,
-        message: "Customer account not found.",
-      });
-    }
-
-    const order = await Order.create({
-      customerId: customerRecord._id,
-
-      customer: {
-        firstName: customerRecord.firstName,
-        lastName: customerRecord.lastName,
-        email: customerRecord.email,
-      },
-
-      orderNumber: generateOrderNumber(),
-
-      items,
-
-      itemCount: Number(itemCount || 0),
-
-      skuCount: Number(skuCount || items.length),
-
-      subtotal: Number(subtotal || 0),
-
-      shipping: Number(shipping || 0),
-
-      total: Number(total || 0),
-
-      shippingAddress: {
-        id: shippingAddress.id || "",
-
-        fullName: shippingAddress.fullName.trim(),
-
-        phone: shippingAddress.phone.trim(),
-
-        addressLine: shippingAddress.addressLine.trim(),
-
-        city: shippingAddress.city.trim(),
-
-        state: shippingAddress.state.trim(),
-
-        pincode: shippingAddress.pincode.trim(),
-
-        landmark: shippingAddress.landmark?.trim() || "",
-      },
-
-      paymentMethod: paymentMethod || "Pending",
-
-      source: source === "buy_now" ? "buy_now" : "cart",
-
-      orderStatus: "Placed",
-
-      deliveredAt: null,
-
-      paymentStatus: "Pending",
-
-      returnStatus: "Not Requested",
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: "Order created successfully.",
-      order,
-    });
-  } catch (error) {
-    console.error("Create order error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to create order.",
-    });
-  }
-};
 
 const getCustomerOrders = async (req, res) => {
   try {
@@ -150,7 +21,7 @@ const getCustomerOrders = async (req, res) => {
       const returnEligible =
         order.orderStatus === "Delivered" &&
         order.returnStatus === "Not Requested" &&
-        remaining >= 0;
+        remaining >= 0 && remaining <= returnWindow;
 
       return {
         ...order.toObject(),
@@ -214,55 +85,17 @@ const getCustomerOrderById = async (
   }
 };
 
-const cancelCustomerOrder = async (
-  req,
-  res
-) => {
+const cancelCustomerOrder = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const order = await Order.findOne({
-      _id: id,
-      customerId: req.customer.id,
-    });
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found.",
-      });
-    }
-
-    if (
-      order.orderStatus !== "Placed" &&
-      order.orderStatus !== "Processing"
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "This order can no longer be cancelled.",
-      });
-    }
-
-    order.orderStatus = "Cancelled";
-
-    await order.save();
-
+    const order = await transitionOrder({ _id: req.params.id, customerId: req.customer.id }, "Cancelled");
     return res.status(200).json({
       success: true,
-      message: "Order cancelled successfully.",
+      message: order.refundStatus === "Completed" ? "Order cancelled and payment refunded." :
+        order.refundStatus !== "Not Requested" ? "Order cancelled. Your refund is being processed." : "Order cancelled successfully.",
       order,
     });
   } catch (error) {
-    console.error(
-      "Cancel customer order error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to cancel this order.",
-    });
+    return res.status(error.status || 500).json({ success: false, message: error.status ? error.message : "Unable to cancel this order." });
   }
 };
 
@@ -331,16 +164,17 @@ const requestCustomerOrderReturn = async (
       });
     }
 
-    order.returnStatus = "Requested";
-    order.returnRequestedAt = new Date();
-
-    await order.save();
+    const updatedOrder = await Order.findOneAndUpdate(
+      { _id: order._id, customerId: req.customer.id, orderStatus: "Delivered", returnStatus: "Not Requested" },
+      { $set: { returnStatus: "Requested", returnRequestedAt: new Date() } }, { returnDocument: "after" }
+    );
+    if (!updatedOrder) return res.status(409).json({ success: false, message: "Order changed. Refresh and try again." });
 
     return res.status(200).json({
       success: true,
       message:
         "Return request submitted successfully.",
-      order,
+      order: updatedOrder,
     });
   } catch (error) {
     console.error(
@@ -380,62 +214,12 @@ const getAllOrders = async (req, res) => {
 
 const updateOrderStatus = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { status } = req.body;
-
-    const allowedStatuses = [
-      "Placed",
-      "Processing",
-      "Shipped",
-      "Out for Delivery",
-      "Delivered",
-      "Cancelled",
-    ];
-
-    if (!allowedStatuses.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid order status.",
-      });
-    }
-
-    const order = await Order.findById(id);
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found.",
-      });
-    }
-
-    order.orderStatus = status;
-
-    if (status === "Delivered") {
-      if (!order.deliveredAt) {
-        order.deliveredAt = new Date();
-      }
-    }
-
-    await order.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Order status updated successfully.",
-      order,
-    });
+    const order = await transitionOrder({ _id: req.params.id }, req.body.status);
+    return res.status(200).json({ success: true, message: "Order status updated successfully.", order });
   } catch (error) {
-    console.error(
-      "Update order status error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to update order status.",
-    });
+    return res.status(error.status || 500).json({ success: false, message: error.status ? error.message : "Unable to update order status." });
   }
 };
-
 
 const updatePaymentStatus = async (req, res) => {
   try {
@@ -465,14 +249,24 @@ const updatePaymentStatus = async (req, res) => {
       });
     }
 
-    order.paymentStatus = status;
+    if (order.paymentMethod === "Razorpay") {
+      return res.status(409).json({ success: false, message: "Razorpay payment status is managed by verified payments and refunds." });
+    }
+    const transitions = { Pending: ["Paid", "Failed"], Failed: ["Pending"], Paid: [], Refunded: [] };
+    if (order.paymentStatus !== status && !transitions[order.paymentStatus]?.includes(status)) {
+      return res.status(409).json({ success: false, message: "Invalid payment status transition." });
+    }
+    const updated = await Order.findOneAndUpdate(
+      { _id: order._id, paymentStatus: order.paymentStatus },
+      { $set: { paymentStatus: status } }, { returnDocument: "after", runValidators: true }
+    );
+    if (!updated) return res.status(409).json({ success: false, message: "Order changed. Refresh and try again." });
 
-    await order.save();
 
     return res.status(200).json({
       success: true,
       message: "Payment status updated successfully.",
-      order,
+      order: updated,
     });
   } catch (error) {
     console.error(
@@ -489,77 +283,21 @@ const updatePaymentStatus = async (req, res) => {
 
 const updateReturnStatus = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { status } = req.body;
-    const order = await Order.findById(id);
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found.",
-      });
-    }
-
-    const allowedTransitions = {
-      Requested: ["Accepted", "Rejected"],
-      Accepted: ["Received"],
-      Received: ["Completed"],
-    };
-
-    if (!allowedTransitions[order.returnStatus]?.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid return status transition.",
-      });
-    }
-
-    const timestampFields = {
-      Accepted: "returnAcceptedAt",
-      Received: "returnReceivedAt",
-      Rejected: "returnRejectedAt",
-    };
-
-    if (status === "Completed") {
-      if (
-        order.paymentStatus !== "Paid" ||
-        order.paymentMethod !== "Razorpay" ||
-        !order.razorpayPaymentId
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "A verified Razorpay payment is required to complete this return.",
-        });
-      }
-
-      const refund = await razorpay.payments.refund(
-        order.razorpayPaymentId
-      );
-      order.paymentStatus = "Refunded";
-      order.razorpayRefundId = refund.id;
-      order.returnCompletedAt = new Date();
-    } else if (timestampFields[status]) {
-      order[timestampFields[status]] = new Date();
-    }
-
-    order.returnStatus = status;
-    await order.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Return status updated successfully.",
-      order,
-    });
+    const order = await transitionOrder({ _id: req.params.id }, req.body.status, "return");
+    return res.status(200).json({ success: true, message: order.refundStatus === "Completed" ? "Return completed and payment refunded." : "Return updated. Any requested refund is being processed.", order });
   } catch (error) {
-    console.error("Update return status error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Unable to update return status.",
-    });
+    return res.status(error.status || 500).json({ success: false, message: error.status ? error.message : "Unable to update return status." });
   }
 };
 
+const reconcileOrderRefund = async (req, res) => {
+  const order = await processRefund(Order, req.params.id);
+  if (!order) return res.status(404).json({ success: false, message: "Order not found." });
+  return res.status(200).json({ success: true, message: "Refund status checked.", order });
+};
+
 module.exports = {
-  createOrder,
+  reconcileOrderRefund,
   getCustomerOrders,
   getCustomerOrderById,
   cancelCustomerOrder,

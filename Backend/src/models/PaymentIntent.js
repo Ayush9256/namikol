@@ -71,6 +71,9 @@ const paymentIntentItemSchema = new mongoose.Schema(
 
 const paymentIntentSchema = new mongoose.Schema(
   {
+    ...require("./refundFields"),
+    paymentCheckedAt: { type: Date, default: null },
+    razorpayRefundId: { type: String, default: "" },
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
@@ -212,10 +215,9 @@ const paymentIntentSchema = new mongoose.Schema(
   }
 );
 
-paymentIntentSchema.index(
-  { expiresAt: 1 },
-  { expireAfterSeconds: 0 }
-);
+// Keep the server payment snapshot for delayed verification and recovery.
+// expiresAt is checkout metadata, never a deletion deadline.
+paymentIntentSchema.index({ expiresAt: 1 });
 
 module.exports = mongoose.model(
   "PaymentIntent",

@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
+const Admin = require("../models/Admin");
 
-const protectAdmin = (req, res, next) => {
+const protectAdmin = async (req, res, next) => {
   try {
     const token = req.cookies?.namikol_admin_token;
 
@@ -23,6 +24,10 @@ const protectAdmin = (req, res, next) => {
       });
     }
 
+    const admin = await Admin.findById(decoded.id).select("role");
+    if (!admin || admin.role !== "admin") {
+      return res.status(401).json({ success: false, message: "Admin account is unavailable." });
+    }
     req.admin = decoded;
 
     next();

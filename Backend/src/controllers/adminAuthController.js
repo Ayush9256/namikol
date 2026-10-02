@@ -16,7 +16,7 @@ const loginAdmin = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (typeof email !== "string" || !email.trim() || typeof password !== "string" || !password) {
       return res.status(400).json({
         success: false,
         message: "Email and password are required.",
@@ -278,7 +278,7 @@ const updateAdminProfilePicture = async (req, res) => {
     const admin = await Admin.findByIdAndUpdate(
       req.admin.id,
       { avatar: uploadResult.secure_url },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     ).select("name email role avatar");
 
     if (!admin) {

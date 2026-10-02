@@ -152,7 +152,7 @@ const updateContactInfo = async (req, res) => {
         },
         $setOnInsert: { key: "store" },
       },
-      { new: true, upsert: true, runValidators: true }
+      { returnDocument: "after", upsert: true, runValidators: true }
     );
 
     return res.status(200).json({

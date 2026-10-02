@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 
 const protectCustomer = require("../middleware/authMiddleware");
 const adminAuth = require("../middleware/adminAuth");
@@ -12,9 +13,14 @@ const {
   updateOrderStatus,
   updatePaymentStatus,
   updateReturnStatus,
+  reconcileOrderRefund,
 } = require("../controllers/orderController");
 
 const router = express.Router();
+router.param("id", (req, res, next, id) => {
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ success: false, message: "Invalid order ID." });
+  next();
+});
 
 // ===============================
 // CUSTOMER ORDER ROUTES
@@ -53,6 +59,7 @@ router.patch(
   adminAuth,
   updateReturnStatus
 );
+router.post("/:id/refund/reconcile", adminAuth, reconcileOrderRefund);
 
 // ===============================
 // CUSTOMER ORDER BY ID / ACTIONS
